@@ -1,24 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, ChevronDown, Sparkles } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
-import hljs from 'highlight.js';
-import 'highlight.js/styles/github-dark.css';
-
+import React, { useState, useRef, useEffect } from "react";
+import { Send, Bot, User, ChevronDown, Sparkles, Import } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import hljs from "highlight.js";
+import "highlight.js/styles/github-dark.css";
+import rehypeRaw from "rehype-raw"; // Allows raw HTML but sanitizes it
+import rehypeSanitize from "rehype-sanitize"; // Sanitizes HTML to prevent XSS
+import modelConfig from "./Model";
 interface Message {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to the bottom of the chat when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // Highlight code blocks
@@ -26,28 +28,38 @@ function App() {
     hljs.highlightAll();
   }, [messages]);
 
+  // Sanitize user input to prevent XSS
+  const sanitizeInput = (input: string): string => {
+    return input.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  };
+
   // Handle sending messages
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
-    const newMessage: Message = { role: 'user', content: input };
+    const sanitizedInput = sanitizeInput(input);
+    const newMessage: Message = { role: "user", content: sanitizedInput };
     setMessages((prev) => [...prev, newMessage]);
-    setInput('');
+    setInput("");
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:11434/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'deepseek-r1:1.5b', prompt: input }),
+      const response = await fetch(modelConfig.localhost, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelConfig.modelName,
+          prompt: input,
+          system: modelConfig.reset,
+        }),
       });
 
-      if (!response.ok) throw new Error('Failed to fetch response from Ollama');
+      if (!response.ok) throw new Error("Failed to fetch response from Ollama");
 
       const reader = response.body?.getReader();
-      let botMessage = '';
-      let buffer = '';
+      let botMessage = "";
+      let buffer = "";
 
       if (reader) {
         while (true) {
@@ -57,19 +69,33 @@ function App() {
           buffer += new TextDecoder().decode(value);
 
           // Split buffer by newlines and attempt to parse each line
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Save incomplete line back to buffer
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Save incomplete line back to buffer
 
           for (const line of lines) {
             try {
               const parsedChunk = JSON.parse(line);
               botMessage += parsedChunk.response;
-              setMessages((prevMessages) => [
-                ...prevMessages.slice(0, -1),
-                { role: 'assistant', content: botMessage },
-              ]);
+
+              // Update the bot's message without removing the user's message
+              setMessages((prevMessages) => {
+                const lastMessage = prevMessages[prevMessages.length - 1];
+                if (lastMessage.role === "assistant") {
+                  // If the last message is from the bot, update it
+                  return [
+                    ...prevMessages.slice(0, -1),
+                    { role: "assistant", content: botMessage },
+                  ];
+                } else {
+                  // If the last message is from the user, add the bot's message
+                  return [
+                    ...prevMessages,
+                    { role: "assistant", content: botMessage },
+                  ];
+                }
+              });
             } catch (err) {
-              console.error('Error parsing JSON chunk:', err);
+              console.error("Error parsing JSON chunk:", err);
             }
           }
         }
@@ -79,12 +105,15 @@ function App() {
         botMessage = "I'm sorry, but I couldn't generate a response.";
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: botMessage }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: botMessage },
+      ]);
     } catch (error) {
       console.error(error);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'Error: Could not fetch response.' },
+        { role: "assistant", content: "Error: Could not fetch response." },
       ]);
     } finally {
       setIsLoading(false);
@@ -119,15 +148,17 @@ function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 className={`flex items-start space-x-4 ${
-                  message.role === 'assistant' ? 'bg-gray-800' : ''
+                  message.role === "assistant" ? "bg-gray-800" : ""
                 } rounded-lg p-4`}
               >
                 <div
                   className={`p-2 rounded-lg ${
-                    message.role === 'assistant' ? 'bg-purple-600' : 'bg-blue-600'
+                    message.role === "assistant"
+                      ? "bg-purple-600"
+                      : "bg-blue-600"
                   }`}
                 >
-                  {message.role === 'assistant' ? (
+                  {message.role === "assistant" ? (
                     <Bot className="w-5 h-5" />
                   ) : (
                     <User className="w-5 h-5" />
@@ -135,9 +166,16 @@ function App() {
                 </div>
                 <div className="flex-1 prose prose-invert max-w-none">
                   <ReactMarkdown
+                    rehypePlugins={[rehypeRaw, rehypeSanitize]} // Sanitize HTML
                     components={{
-                      code: ({ node, inline, className, children, ...props }) => {
-                        const match = /language-(\w+)/.exec(className || '');
+                      code: ({
+                        node,
+                        inline,
+                        className,
+                        children,
+                        ...props
+                      }) => {
+                        const match = /language-(\w+)/.exec(className || "");
                         return !inline && match ? (
                           <pre className="!bg-gray-950 rounded-lg p-4">
                             <code className={className} {...props}>
