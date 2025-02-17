@@ -41,8 +41,5 @@ This project provides a user-friendly web interface (GUI) built with React and T
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
-## License
-
-[Add your license here]
 
 
