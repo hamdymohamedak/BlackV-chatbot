@@ -43,3 +43,4 @@ This project provides a user-friendly web interface (GUI) built with React and T
 7. **Reset the model**
    - you can change the model setting by reset variable at Modal.tsx
      ![example](image.png)
+     ![alt text](image-1.png)
